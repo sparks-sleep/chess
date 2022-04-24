@@ -74,11 +74,11 @@ func (g *Game) loadResource() bool {
 			g.audios[k] = player
 		} else {
 			//加载图片
-			i := l.LoadImage(v)
-			if i == nil {
+			img := l.LoadImage(v)
+			if img == nil {
 				return false
 			}
-			g.images[k] = i
+			g.images[k] = img
 		}
 	}
 	return true
@@ -94,11 +94,8 @@ func (g *Game) Update() error {
 		x, y := ebiten.CursorPosition()
 		xPos := Left + (x-BoardEdge)/SquareSize
 		yPos := Top + (y-BoardEdge)/SquareSize
-		fmt.Printf("计算后的坐标：x=%d y=%d\n", xPos, yPos)
-		squareXY := xPos + (yPos << 4) //当前鼠标所在棋盘的纵坐标
-		fmt.Printf("当前鼠标所在棋盘的纵坐标：squareXY=%d\n", squareXY)
-		//screen图片资源 squareXY当前鼠标所在棋盘的纵坐标
-		g.clickSquare1(squareXY)
+
+		g.clickSquare1(xPos, yPos)
 	}
 	return nil
 }
@@ -108,44 +105,6 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	g.drawBoard(screen) //绘制棋盘
 	if g.bGameOver {
 		g.messageBox(screen)
-	}
-}
-
-//绘制棋盘
-func (g *Game) drawBoard(screen *ebiten.Image) {
-	//棋盘
-	if v, ok := g.images[ImgChessBoard]; ok {
-		op := &ebiten.DrawImageOptions{}
-		op.GeoM.Translate(0, 0)
-		screen.DrawImage(v, op)
-	}
-	//棋子
-	for x := Left; x <= Right; x++ {
-		for y := Top; y <= Bottom; y++ {
-			xPos, yPos := 0, 0
-			if g.bFlipped {
-				xPos = BoardEdge + (xFlip(x)-Left)*SquareSize
-				yPos = BoardEdge + (yFlip(y)-Top)*SquareSize
-			} else {
-				xPos = BoardEdge + (x-Left)*SquareSize
-				yPos = BoardEdge + (y-Top)*SquareSize
-			}
-			sq := squareXY(x, y)
-			pc := g.singlePosition.ucpcSquares[sq]
-			if pc != 0 {
-				g.drawChess(xPos, yPos+5, screen, g.images[pc]) //绘制棋子
-			}
-			if sq == g.sqSelected {
-				fmt.Printf("sq=%d\t\tsqSelected=%d\n", sq, g.sqSelected)
-				const scaleParam = 1.02
-				//xScale := float64(xPos) / scaleParam
-				//yScale := float64(yPos) / scaleParam
-				g.drawPieceScale(float64(xPos)/scaleParam, float64(yPos)/scaleParam, scaleParam, scaleParam, screen, g.images[pc])
-			}
-			if sq == src(g.mvLast) || sq == dst(g.mvLast) {
-				g.drawChess(xPos, yPos, screen, g.images[ImgSelect]) //绘制棋子
-			}
-		}
 	}
 }
 
@@ -166,8 +125,49 @@ func (g *Game) playAudio(value int) bool {
 	return false
 }
 
+//绘制棋盘,并且加载棋子的位置
+func (g *Game) drawBoard(screen *ebiten.Image) {
+	//棋盘
+	if v, ok := g.images[ImgChessBoard]; ok {
+		op := &ebiten.DrawImageOptions{}
+		op.GeoM.Translate(0, 0)
+		screen.DrawImage(v, op)
+	}
+	//棋子
+	for x := Left; x <= Right; x++ {
+		for y := Top; y <= Bottom; y++ {
+			xPos, yPos := 0, 0 //初始化,图片x、y坐标
+			if g.bFlipped {
+				xPos = BoardEdge + (xFlip(x)-Left)*SquareSize
+				yPos = BoardEdge + (yFlip(y)-Top)*SquareSize
+			} else {
+				xPos = BoardEdge + (x-Left)*SquareSize
+				yPos = BoardEdge + (y-Top)*SquareSize
+			}
+			sq := squareXY(x, y) ////棋子所在棋盘的纵坐标,值范围[0-255]
+			pc := g.singlePosition.ucpcSquares[sq]
+
+			if pc != 0 {
+				g.drawPiece(xPos, yPos+5, screen, g.images[pc]) //绘制棋子
+			}
+
+			if sq == g.sqSelected {
+				const scaleParam = 1.02
+				xScale := float64(xPos) / scaleParam
+				yScale := float64(yPos) / scaleParam
+				g.drawPieceScale(xScale, yScale, scaleParam, scaleParam, screen, g.images[pc])
+			}
+
+			if sq == src(g.mvLast) || sq == dst(g.mvLast) {
+				g.drawPiece(xPos, yPos, screen, g.images[ImgSelect]) //绘制棋子
+			}
+		}
+	}
+
+}
+
 //绘制棋子
-func (g *Game) drawChess(x, y int, screen, img *ebiten.Image) {
+func (g *Game) drawPiece(x, y int, screen, img *ebiten.Image) {
 	if img == nil {
 		return
 	}
@@ -191,19 +191,21 @@ func (g *Game) drawPieceScale(x, y, scaleX, scaleY float64, screen, img *ebiten.
 点击格子处理
 screen图片资源 squareXY当前鼠标所在棋盘的纵坐标
 */
-func (g *Game) clickSquare1(squareXY int) {
-	piece := g.singlePosition.ucpcSquares[squareXY] //棋盘上的棋子
-	sdPlayer := g.singlePosition.sdPlayer           //轮到谁走，0=红方，1=黑方.默认为0
-	sideTag := 8 + (sdPlayer << 3)                  //值为（8、16）
+func (g *Game) clickSquare1(x, y int) {
+	sq := squareXY(x, y) //当前鼠标所在棋盘的纵坐标
+	//fmt.Printf("当前鼠标所在格子xy坐标及棋盘的纵坐标：x=%d\ty=%d\tsq=%d\n", x, y, sq)
+	piece := g.singlePosition.ucpcSquares[sq] //棋盘上的棋子
+	sdPlayer := g.singlePosition.sdPlayer     //轮到谁走，0=红方，1=黑方.默认为0
+	sideTag := 8 + (sdPlayer << 3)            //值为（8、16）
 	//按位与运算符"&"是双目运算符。 其功能是参与运算的两数各对应的二进位相与
 	if piece&sideTag != 0 { //值为（8、16、0）
 		//如果点击自己的棋子，那么直接选中
-		g.sqSelected = piece
+		g.sqSelected = sq
 		g.playAudio(MusicSelect) //播放选子音效
 	} else if g.sqSelected != 0 && !g.bGameOver {
 		//如果点击的不是自己的棋子，但有棋子选中了（一定是自己的棋子），那么走这个棋子
 		//根据起点和终点获得走法
-		mv := g.sqSelected + squareXY*256
+		mv := g.sqSelected + sq*256
 		g.singlePosition.makeMove(mv) //走一步棋
 		g.mvLast = mv                 //保存上一步走法
 		g.sqSelected = 0              //把我们的选中的格子清0
@@ -214,13 +216,11 @@ func (g *Game) clickSquare1(squareXY int) {
 			g.playAudio(MusicEat)
 		}
 	}
-	//fmt.Printf("选中的格子：%d\n", g.sqSelected)
 }
 
 //点击格子处理
 func (g *Game) clickSquare(screen *ebiten.Image, sq int) {
 	pc := 0
-	fmt.Printf("Game类：%t\n", g.bFlipped)
 	//是否翻转棋盘
 	if g.bFlipped {
 		pc = g.singlePosition.ucpcSquares[squareFlip(sq)]
