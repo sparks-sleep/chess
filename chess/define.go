@@ -355,14 +355,35 @@ func mirrorMove(mv int) int {
 }
 
 const (
-	//LimitDepth 最大的搜索深度
-	LimitDepth = 32
 	//MateValue 最高分值，即将死的分值
 	MateValue = 10000
-	//WinValue 搜索出胜负的分值界限，超出此值就说明已经搜索出杀棋了
-	WinValue = MateValue - 100
 	//AdvancedValue 先行权分值
 	AdvancedValue = 3
+)
+
+//BanValue 长将判负的分值，低于该值将不写入置换表
+const BanValue = MateValue - 100
+
+//WinValue 搜索出胜负的分值界限，超出此值就说明已经搜索出杀棋了
+const WinValue = MateValue - 200
+
+//RandomMask 随机性分值
+const RandomMask = 7
+
+//BookSize 开局库大小
+const BookSize = 16384
+
+const (
+	//MaxMoves 最大的历史走法数
+	MaxMoves = 256
+	//LimitDepth 最大的搜索深度
+	LimitDepth = 64
+	//DrawValue 和棋时返回的分数(取负值)
+	DrawValue = 20
+	//NullMargin 空步裁剪的子力边界
+	NullMargin = 400
+	//NullDepth 空步裁剪的裁剪深度
+	NullDepth = 2
 )
 
 // 子力位置价值表
@@ -486,3 +507,30 @@ var cucvlPiecePos = [7][256]int{
 		0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 		0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 		0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}}
+
+//cucMvvLva MVV/LVA每种子力的价值
+var cucMvvLva = [24]int{
+	0, 0, 0, 0, 0, 0, 0, 0,
+	5, 1, 1, 3, 4, 3, 2, 0,
+	5, 1, 1, 3, 4, 3, 2, 0}
+
+//HashSize 置换表大小
+const HashSize = 1 << 20
+
+//HashAlpha ALPHA节点的置换表项
+const HashAlpha = 1
+
+//HashBeta BETA节点的置换表项
+const HashBeta = 2
+
+//HashPV PV节点的置换表项
+const HashPV = 3
+
+//走法排序阶段
+const (
+	PhaseHash     = 0
+	PhaseKiller1  = 1
+	PhaseKiller2  = 2
+	PhaseGenMoves = 3
+	PhaseRest     = 4
+)

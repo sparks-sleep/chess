@@ -5,6 +5,7 @@ import (
 	"image/color"
 	_ "image/png"
 	"log"
+	"time"
 
 	"github.com/golang/freetype/truetype"
 	"github.com/hajimehoshi/ebiten/v2"
@@ -49,10 +50,13 @@ func NewGame() bool {
 	if ok := game.loadResource(); !ok {
 		return false
 	}
+	//加载开局库
+	game.singlePosition.loadBook()
+	game.singlePosition.startup()
+
+	//设置窗口，接收信息
 	ebiten.SetWindowSize(BoardWidth, BoardHeight)
 	ebiten.SetWindowTitle("中国象棋")
-
-	game.singlePosition.startup()
 
 	if err := ebiten.RunGame(game); err != nil {
 		log.Fatal(err)
@@ -87,22 +91,31 @@ func (g *Game) loadResource() bool {
 //更新状态，1秒60帧
 ////该 method 属于 Game 类型对象中的方法
 func (g *Game) Update() error {
-	//IsMouseButtonJustPressed坚持对应的按钮有没有触发
-	//MouseButtonLeft表示鼠标左键，象棋游戏只需要用到鼠标左键
-	if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
-		//CursorPosition获取当前鼠标的屏幕坐标，通过屏幕坐标可以计算出所在的格子坐标
-		x, y := ebiten.CursorPosition()
-		xPos := Left + (x-BoardEdge)/SquareSize
-		yPos := Top + (y-BoardEdge)/SquareSize
 
-		g.clickSquare1(xPos, yPos)
-	}
 	return nil
 }
 
 //绘制屏幕
 func (g *Game) Draw(screen *ebiten.Image) {
-	g.drawBoard(screen) //绘制棋盘
+
+	g.drawBoard(screen)
+	//IsMouseButtonJustPressed坚持对应的按钮有没有触发
+	//MouseButtonLeft表示鼠标左键，象棋游戏只需要用到鼠标左键
+	if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
+		if g.bGameOver {
+			g.bGameOver = false
+			g.showValue = ""
+			g.sqSelected = 0
+			g.mvLast = 0
+			//g.singlePosition.startup()
+		} else {
+			x, y := ebiten.CursorPosition()
+			x = Left + (x-BoardEdge)/SquareSize
+			y = Top + (y-BoardEdge)/SquareSize
+			g.clickSquare(screen, x, y)
+		}
+	}
+
 	if g.bGameOver {
 		g.messageBox(screen)
 	}
@@ -187,91 +200,6 @@ func (g *Game) drawPieceScale(x, y, scaleX, scaleY float64, screen, img *ebiten.
 	screen.DrawImage(img, op)
 }
 
-/*
-点击格子处理
-screen图片资源 squareXY当前鼠标所在棋盘的纵坐标
-*/
-func (g *Game) clickSquare1(x, y int) {
-	sq := squareXY(x, y) //当前鼠标所在棋盘的纵坐标
-	//fmt.Printf("当前鼠标所在格子xy坐标及棋盘的纵坐标：x=%d\ty=%d\tsq=%d\n", x, y, sq)
-	piece := g.singlePosition.ucpcSquares[sq] //棋盘上的棋子
-	sdPlayer := g.singlePosition.sdPlayer     //轮到谁走，0=红方，1=黑方.默认为0
-	sideTag := 8 + (sdPlayer << 3)            //值为（8、16）
-	//按位与运算符"&"是双目运算符。 其功能是参与运算的两数各对应的二进位相与
-	if piece&sideTag != 0 { //值为（8、16、0）
-		//如果点击自己的棋子，那么直接选中
-		g.sqSelected = sq
-		g.playAudio(MusicSelect) //播放选子音效
-	} else if g.sqSelected != 0 && !g.bGameOver {
-		//如果点击的不是自己的棋子，但有棋子选中了（一定是自己的棋子），那么走这个棋子
-		//根据起点和终点获得走法
-		mv := g.sqSelected + sq*256
-		g.singlePosition.makeMove(mv) //走一步棋
-		g.mvLast = mv                 //保存上一步走法
-		g.sqSelected = 0              //把我们的选中的格子清0
-
-		if piece == 0 {
-			g.playAudio(MusicPut)
-		} else {
-			g.playAudio(MusicEat)
-		}
-	}
-}
-
-//点击格子处理
-func (g *Game) clickSquare(screen *ebiten.Image, sq int) {
-	pc := 0
-	//是否翻转棋盘
-	if g.bFlipped {
-		pc = g.singlePosition.ucpcSquares[squareFlip(sq)]
-	} else {
-		pc = g.singlePosition.ucpcSquares[sq]
-	}
-	sdPlayer := g.singlePosition.sdPlayer //轮到谁走，0=红方，1=黑方
-
-	fmt.Printf("当前鼠标点击所在棋盘的纵坐标：%d\n", sq)
-
-	if (pc & sideTag(sdPlayer)) != 0 {
-		//如果点击自己的棋子，那么直接选中
-		g.sqSelected = sq
-
-		g.playAudio(MusicSelect) //播放选子音效
-	} else if g.sqSelected != 0 && !g.bGameOver {
-
-		//如果点击的不是自己的棋子，但有棋子选中了（一定是自己的棋子），那么走这个棋子
-		mv := move(g.sqSelected, sq)
-		if g.singlePosition.legalMove(mv) {
-			fmt.Printf("进入‘点击格子处理’函数,mv=%d\n", mv)
-			if ok := g.singlePosition.makeMove(mv); ok {
-
-				g.mvLast = mv
-				g.sqSelected = 0
-				if g.singlePosition.isMate() {
-					//如果分出胜负，那么播放胜负的声音，并且弹出不带声音的提示框
-					g.playAudio(MusicGameWin)
-					g.showValue = "Your Win!"
-					g.bGameOver = true
-				} else {
-					//如果没有分出胜负，那么播放将军、吃子或一般走子的声音
-					if g.singlePosition.checked() {
-						g.playAudio(MusicJiang)
-					} else {
-						if pc != 0 {
-							g.playAudio(MusicEat)
-						} else {
-							g.playAudio(MusicPut)
-						}
-					}
-					g.aiMove(screen)
-				}
-			} else {
-				g.playAudio(MusicJiang)
-			}
-		}
-	}
-	//如果根本就不符合走法（例如马不走日字），那么不做什么处理
-}
-
 //messageBox 提示
 /*
 truetype.Parse解析字体
@@ -298,25 +226,122 @@ func (g *Game) messageBox(screen *ebiten.Image) {
 //aiMove AI移动
 func (g *Game) aiMove(screen *ebiten.Image) {
 	//AI走一步棋
-	// g.singlePosition.searchMain()
-	// _, pcCaptured := g.singlePosition.makeMove(g.singlePosition.search.mvResult)
-	// //把AI走的棋标记出来
-	// g.mvLast = g.singlePosition.search.mvResult
-	// if g.singlePosition.isMate() {
-	// 	//如果分出胜负，那么播放胜负的声音
-	// 	g.playAudio(MusicGameWin)
-	// 	g.showValue = "Your Lose!"
-	// 	g.bGameOver = true
-	// } else {
-	// 	//如果没有分出胜负，那么播放将军、吃子或一般走子的声音
-	// 	if g.singlePosition.checked() {
-	// 		g.playAudio(MusicJiang)
-	// 	} else {
-	// 		if pcCaptured != 0 {
-	// 			g.playAudio(MusicEat)
-	// 		} else {
-	// 			g.playAudio(MusicPut)
-	// 		}
-	// 	}
-	// }
+	g.singlePosition.searchMain()
+	g.singlePosition.makeMove(g.singlePosition.search.mvResult)
+	//把AI走的棋标记出来
+	g.mvLast = g.singlePosition.search.mvResult
+	//检查重复局面
+	vlRep := g.singlePosition.repStatus(3)
+	if g.singlePosition.isMate() {
+		//如果分出胜负，那么播放胜负的声音
+		g.playAudio(MusicGameWin)
+		g.showValue = "Your Lose!"
+		g.bGameOver = true
+	} else if vlRep > 0 {
+		vlRep = g.singlePosition.repValue(vlRep)
+		//vlRep是对玩家来说的分值
+		if vlRep < -WinValue {
+			g.playAudio(MusicGameLose)
+			g.showValue = "Your Lose!"
+		} else {
+			if vlRep > WinValue {
+				g.playAudio(MusicGameWin)
+				g.showValue = "Your Lose!"
+			} else {
+				g.playAudio(MusicGameWin)
+				g.showValue = "Your Draw!"
+			}
+		}
+		g.bGameOver = true
+	} else if g.singlePosition.nMoveNum > 100 {
+		g.playAudio(MusicGameWin)
+		g.showValue = "Your Draw!"
+		g.bGameOver = true
+	} else {
+		//如果没有分出胜负，那么播放将军、吃子或一般走子的声音
+		if g.singlePosition.inCheck() {
+			g.playAudio(MusicJiang)
+		} else {
+			if g.singlePosition.captured() {
+				g.playAudio(MusicEat)
+			} else {
+				g.playAudio(MusicPut)
+			}
+		}
+		if g.singlePosition.captured() {
+			g.singlePosition.setIrrev()
+		}
+	}
+}
+
+//clickSquare 点击格子处理
+func (g *Game) clickSquare(screen *ebiten.Image, x, y int) {
+	sq := squareXY(x, y)
+	pc := 0
+	if g.bFlipped {
+		pc = g.singlePosition.ucpcSquares[squareFlip(sq)]
+
+	} else {
+		pc = g.singlePosition.ucpcSquares[sq]
+	}
+
+	//按位与运算符"&"是双目运算符。 其功能是参与运算的两数各对应的二进位相与
+	if (pc & sideTag(g.singlePosition.sdPlayer)) != 0 { //值为（8、16、0）
+		//如果点击自己的棋子，那么直接选中
+		g.sqSelected = sq
+		g.playAudio(MusicSelect)
+	} else if g.sqSelected != 0 && !g.bGameOver {
+		//如果点击的不是自己的棋子，但有棋子选中了(一定是自己的棋子)，那么走这个棋子
+		mv := move(g.sqSelected, sq)
+		if g.singlePosition.legalMove(mv) {
+			if g.singlePosition.makeMove(mv) {
+				g.mvLast = mv
+				g.sqSelected = 0
+				// 检查重复局面
+				vlRep := g.singlePosition.repStatus(3)
+				if g.singlePosition.isMate() {
+					// 如果分出胜负，那么播放胜负的声音，并且弹出不带声音的提示框
+					g.playAudio(MusicGameWin)
+					g.showValue = "Your Win!"
+					g.bGameOver = true
+				} else if vlRep > 0 {
+					vlRep = g.singlePosition.repValue(vlRep)
+					if vlRep > WinValue {
+						g.playAudio(MusicGameLose)
+						g.showValue = "Your Lose!"
+					} else {
+						if vlRep < -WinValue {
+							g.playAudio(MusicGameWin)
+							g.showValue = "Your Win!"
+						} else {
+							g.playAudio(MusicGameWin)
+							g.showValue = "Your Draw!"
+						}
+					}
+					g.bGameOver = true
+				} else if g.singlePosition.nMoveNum > 100 {
+					g.playAudio(MusicGameWin)
+					g.showValue = "Your Draw!"
+					g.bGameOver = true
+				} else {
+					if g.singlePosition.checked() {
+						g.playAudio(MusicJiang)
+					} else {
+						if g.singlePosition.captured() {
+							g.playAudio(MusicEat)
+							g.singlePosition.setIrrev()
+						} else {
+							g.playAudio(MusicPut)
+						}
+					}
+
+					time.Sleep(1 * time.Second)
+					g.aiMove(screen)
+				}
+			} else {
+				g.playAudio(MusicJiang) // 播放被将军的声音
+			}
+		}
+		//如果根本就不符合走法(例如马不走日字)，那么不做任何处理
+	}
 }
